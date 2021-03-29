@@ -13,6 +13,27 @@ $file = "OpenSSH-Win64.zip"
 
 $releases = "https://api.github.com/repos/$repo/releases"
 
+# Make sure either english or german is the win system locale
+switch ($((Get-UICulture)[0].DisplayName)){
+  'Deutsch (Deutschland)' {
+     Write-Host "$((Get-UICulture)[0].DisplayName) detected, translating ACLs to German"
+     $authenticatedUserName = "NT-AUTORITÄT\Authentifizierte Benutzer"
+     $systemUserName = "NT-AUTORITÄT\SYSTEM"
+     $administratorsUserName = "VORDEFINIERT\Administratoren"
+  }
+  'English (United States)' {
+     Write-Host "$((Get-UICulture)[0].DisplayName) detected, using default ACLs"
+     $authenticatedUserName = "NT AUTHORITY\Authenticated Users"
+     $systemUserName = "NT AUTHORITY\SYSTEM"
+     $administratorsUserName = "BUILTIN\Administrators"
+  }
+  default {
+     Write-Error 'Currently only English and German UI Languages are supported'
+     exit 1 
+  }
+}
+
+
 Write-Host "Enforce TLS 1.2"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
@@ -100,41 +121,59 @@ New-ItemProperty -Path "HKLM:\SOFTWARE\OpenSSH" -Name DefaultShell -Value "C:\Wi
 New-ItemProperty -Path "HKLM:\SOFTWARE\OpenSSH" -Name DefaultShellCommandOption -Value "/c" -PropertyType String -Force
 Write-Host "Set Default Shell and Default Command Options for OpenSSH Server"
 
-# Create Folder for Administrator SSH Key
-New-Item -Path "$programdataPath\ssh\" -Name $administratorKeysFolder -ItemType "directory"
+# Check if folder for Administrator SSH Keys exists
+Write-Host "Checking existence of folder for Administrators ssh keys exists"
+if(!(Test-Path -path "$programdataPath\ssh\$administratorKeysFolder")) {
+  # Create Folder
+  Write-Host "Creating folder for Administrators ssh keys"
+  New-Item -Path "$programdataPath\ssh\" -Name $administratorKeysFolder -ItemType "directory"
+} else {
+  # Folder already exists
+  Write-Host "Folder for Administrators ssh keys already exists, ACLs will be updated to overwrite administrators_authorized_keys"
+  $acl = Get-ACL -Path "$programdataPath\ssh\$administratorKeysFolder"
+  $accessrule = New-Object system.security.AccessControl.FileSystemAccessRule($administratorsUserName,"FullControl","ContainerInherit,ObjectInherit","none","Allow")
+  $acl.AddAccessRule($accessrule)
+  
+  # Set Modified ACL on administratorKeysFolder
+  Set-Acl -Path "$programdataPath\ssh\$administratorKeysFolder" -AclObject $acl
+}
 
 # Copy Administrator Key file to __PROGRAMDATA__/ssh/administrators_authorized_keys
 Copy-Item "$scriptDir\administrators_authorized_keys" -Destination "$programdataPath\ssh\$administratorKeysFolder\administrators_authorized_keys"
+Write-Host "$scriptDir\administrators_authorized_keys has been updated with the local copy"
 
 # Remove Permission Inheritance
 $acl = Get-ACL -Path "$programdataPath\ssh\$administratorKeysFolder"
 $acl.SetAccessRuleProtection($True, $True)
 
 # Remove Authenticated Users from acl
-$accessrule = New-Object system.security.AccessControl.FileSystemAccessRule("NT AUTHORITY\Authenticated Users","Read",,,"Allow")
+$accessrule = New-Object system.security.AccessControl.FileSystemAccessRule($authenticatedUserName,"Read",,,"Allow")
 $acl.RemoveAccessRuleAll($accessrule)
 
 # Remove All Write and Modify Permissions for System and Administrators
-$accessrule = New-Object system.security.AccessControl.FileSystemAccessRule("NT AUTHORITY\SYSTEM","Read",,,"Allow")
+$accessrule = New-Object system.security.AccessControl.FileSystemAccessRule($systemUserName,"Read",,,"Allow")
 $acl.RemoveAccessRuleAll($accessrule)
-$accessrule = New-Object system.security.AccessControl.FileSystemAccessRule("BUILTIN\Administrators","Read",,,"Allow")
+$accessrule = New-Object system.security.AccessControl.FileSystemAccessRule($administratorsUserName,"Read",,,"Allow")
 $acl.RemoveAccessRuleAll($accessrule)
 
 # Add Read Only Permissions for System and Administrators
-$accessrule = New-Object system.security.AccessControl.FileSystemAccessRule("NT AUTHORITY\SYSTEM","Read","ContainerInherit,ObjectInherit","none","Allow")
+$accessrule = New-Object system.security.AccessControl.FileSystemAccessRule($systemUserName,"Read","ContainerInherit,ObjectInherit","none","Allow")
 $acl.AddAccessRule($accessrule)
-$accessrule = New-Object system.security.AccessControl.FileSystemAccessRule("BUILTIN\Administrators","Read","ContainerInherit,ObjectInherit","none","Allow")
+$accessrule = New-Object system.security.AccessControl.FileSystemAccessRule($administratorsUserName,"Read","ContainerInherit,ObjectInherit","none","Allow")
 $acl.AddAccessRule($accessrule)
 
 # Set Modified ACL on administratorKeysFolder
 Set-Acl -Path "$programdataPath\ssh\$administratorKeysFolder" -AclObject $acl
+Write-Host "ACL of $programdataPath\ssh\$administratorKeysFolder has been updated to comply with OpenSSH required settings"
 
 # Change Path to administrators_authorized_keys
 $sshconfigfile = "$programdataPath\ssh\sshd_config"
 $regex = '       AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys'
 (Get-Content $sshconfigfile) -replace $regex, "       AuthorizedKeysFile __PROGRAMDATA__/ssh/$administratorKeysFolder/administrators_authorized_keys" | Set-Content $sshconfigfile
+Write-Host "OpenSSH config has been adapted to use the following file for Administrators ssh keys$programdataPath\ssh\$administratorKeysFolder\administrators_authorized_keys"
 
 # Restart SSHD
 Restart-Service -Name sshd
+Write-Host "OpenSSH Server has been restarted to load updated config"
 
 cd $scriptDir
