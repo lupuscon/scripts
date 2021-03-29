@@ -129,7 +129,7 @@ $acl = Get-ACL "$programdataPath\ssh\administrators_authorized_keys"
 $acl.SetAccessRuleProtection($True, $True)
 
 # Remove Authenticated Users from acl
-$accessrule = New-Object system.security.AccessControl.FileSystemAccessRule($authenticatedUserName,"Read","Allow")
+$accessrule = New-Object system.security.AccessControl.FileSystemAccessRule($authenticatedUserName,"Read",,,"Allow")
 $acl.RemoveAccessRuleAll($accessrule)
 
 # Remove All Write and Modify Permissions for System and Administrators
