@@ -1,4 +1,5 @@
 ﻿#Requires -RunAsAdministrator
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $installPath = "C:\Program Files\OpenSSH"
 $tempPath = "C:\Windows\Temp"
 cd $tempPath
@@ -103,7 +104,7 @@ Write-Host "Set Default Shell and Default Command Options for OpenSSH Server"
 New-Item -Path "$programdataPath\ssh\" -Name $administratorKeysFolder -ItemType "directory"
 
 # Copy Administrator Key file to __PROGRAMDATA__/ssh/administrators_authorized_keys
-Copy-Item "administrators_authorized_keys" -Destination "$programdataPath\ssh\$administratorKeysFolder\administrators_authorized_keys"
+Copy-Item "$scriptDir\administrators_authorized_keys" -Destination "$programdataPath\ssh\$administratorKeysFolder\administrators_authorized_keys"
 
 # Remove Permission Inheritance
 $acl = Get-ACL -Path "$programdataPath\ssh\$administratorKeysFolder"
@@ -135,3 +136,5 @@ $regex = '       AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorize
 
 # Restart SSHD
 Restart-Service -Name sshd
+
+cd $scriptDir
