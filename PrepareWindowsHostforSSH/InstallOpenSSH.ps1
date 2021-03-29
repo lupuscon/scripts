@@ -5,7 +5,6 @@ $tempPath = "C:\Windows\Temp"
 cd $tempPath
 
 $programdataPath = "C:\ProgramData"
-$administratorKeysFolder = ".ssh"
 $fwrule_name = "OpenSSH Server (sshd)"
 
 $repo = "PowerShell/Win32-OpenSSH"
@@ -121,57 +120,60 @@ New-ItemProperty -Path "HKLM:\SOFTWARE\OpenSSH" -Name DefaultShell -Value "C:\Wi
 New-ItemProperty -Path "HKLM:\SOFTWARE\OpenSSH" -Name DefaultShellCommandOption -Value "/c" -PropertyType String -Force
 Write-Host "Set Default Shell and Default Command Options for OpenSSH Server"
 
-# Check if folder for Administrator SSH Keys exists
-Write-Host "Checking existence of folder for Administrators ssh keys exists"
-if(!(Test-Path -path "$programdataPath\ssh\$administratorKeysFolder")) {
-  # Create Folder
-  Write-Host "Creating folder for Administrators ssh keys"
-  New-Item -Path "$programdataPath\ssh\" -Name $administratorKeysFolder -ItemType "directory"
-} else {
-  # Folder already exists
-  Write-Host "Folder for Administrators ssh keys already exists, ACLs will be updated to overwrite administrators_authorized_keys"
-  $acl = Get-ACL -Path "$programdataPath\ssh\$administratorKeysFolder"
-  $accessrule = New-Object system.security.AccessControl.FileSystemAccessRule($administratorsUserName,"FullControl","ContainerInherit,ObjectInherit","none","Allow")
-  $acl.AddAccessRule($accessrule)
-  
-  # Set Modified ACL on administratorKeysFolder
-  Set-Acl -Path "$programdataPath\ssh\$administratorKeysFolder" -AclObject $acl
-}
-
 # Copy Administrator Key file to __PROGRAMDATA__/ssh/administrators_authorized_keys
-Copy-Item "$scriptDir\administrators_authorized_keys" -Destination "$programdataPath\ssh\$administratorKeysFolder\administrators_authorized_keys"
+Copy-Item "$scriptDir\administrators_authorized_keys" -Destination "$programdataPath\ssh\administrators_authorized_keys"
 Write-Host "$scriptDir\administrators_authorized_keys has been updated with the local copy"
 
 # Remove Permission Inheritance
-$acl = Get-ACL -Path "$programdataPath\ssh\$administratorKeysFolder"
+$acl = Get-ACL "$programdataPath\ssh\administrators_authorized_keys"
 $acl.SetAccessRuleProtection($True, $True)
 
 # Remove Authenticated Users from acl
-$accessrule = New-Object system.security.AccessControl.FileSystemAccessRule($authenticatedUserName,"Read",,,"Allow")
+$accessrule = New-Object system.security.AccessControl.FileSystemAccessRule($authenticatedUserName,"Read","Allow")
 $acl.RemoveAccessRuleAll($accessrule)
 
 # Remove All Write and Modify Permissions for System and Administrators
-$accessrule = New-Object system.security.AccessControl.FileSystemAccessRule($systemUserName,"Read",,,"Allow")
+$accessrule = New-Object system.security.AccessControl.FileSystemAccessRule($systemUserName,"Read","Allow")
 $acl.RemoveAccessRuleAll($accessrule)
-$accessrule = New-Object system.security.AccessControl.FileSystemAccessRule($administratorsUserName,"Read",,,"Allow")
+$accessrule = New-Object system.security.AccessControl.FileSystemAccessRule($administratorsUserName,"Read","Allow")
 $acl.RemoveAccessRuleAll($accessrule)
 
-# Add Read Only Permissions for System and Administrators
-$accessrule = New-Object system.security.AccessControl.FileSystemAccessRule($systemUserName,"Read","ContainerInherit,ObjectInherit","none","Allow")
+# Add FullControl Permissions for System and Administrators
+$accessrule = New-Object system.security.AccessControl.FileSystemAccessRule($systemUserName,"FullControl","Allow")
 $acl.AddAccessRule($accessrule)
-$accessrule = New-Object system.security.AccessControl.FileSystemAccessRule($administratorsUserName,"Read","ContainerInherit,ObjectInherit","none","Allow")
+$accessrule = New-Object system.security.AccessControl.FileSystemAccessRule($administratorsUserName,"FullControl","Allow")
 $acl.AddAccessRule($accessrule)
 
 # Set Modified ACL on administratorKeysFolder
-Set-Acl -Path "$programdataPath\ssh\$administratorKeysFolder" -AclObject $acl
-Write-Host "ACL of $programdataPath\ssh\$administratorKeysFolder has been updated to comply with OpenSSH required settings"
+Set-Acl "$programdataPath\ssh\administrators_authorized_keys" -AclObject $acl
+Write-Host "ACL of $programdataPath\ssh\administrators_authorized_keys has been updated to comply with OpenSSH required settings"
 
-# Change Path to administrators_authorized_keys
+# Change default configuration
 $sshconfigfile = "$programdataPath\ssh\sshd_config"
-$regex = '       AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys'
-(Get-Content $sshconfigfile) -replace $regex, "       AuthorizedKeysFile __PROGRAMDATA__/ssh/$administratorKeysFolder/administrators_authorized_keys" | Set-Content $sshconfigfile
-Write-Host "OpenSSH config has been adapted to use the following file for Administrators ssh keys$programdataPath\ssh\$administratorKeysFolder\administrators_authorized_keys"
 
+# Enable Listen Port 22
+$regex = '#Port 22'
+(Get-Content $sshconfigfile) -replace $regex, "Port 22" | Set-Content $sshconfigfile
+
+# Change Syslog Facility
+$regex = '#SyslogFacility AUTH'
+(Get-Content $sshconfigfile) -replace $regex, "SyslogFacility AUTH" | Set-Content $sshconfigfile
+
+# Change Syslog Level
+$regex = '#LogLevel INFO'
+(Get-Content $sshconfigfile) -replace $regex, "LogLevel ERROR" | Set-Content $sshconfigfile
+
+# Enable PublicKeyAuth
+$regex = '#PubkeyAuthentication yes'
+(Get-Content $sshconfigfile) -replace $regex, "PubkeyAuthentication yes" | Set-Content $sshconfigfile
+
+# Enable StrictMode
+$regex = '#StrictModes yes'
+(Get-Content $sshconfigfile) -replace $regex, "StrictModes yes" | Set-Content $sshconfigfile
+
+# Disable Administrator Password Authentication
+$regex = '#PermitRootLogin prohibit-password'
+(Get-Content $sshconfigfile) -replace $regex, "PermitRootLogin prohibit-password" | Set-Content $sshconfigfile
 # Restart SSHD
 Restart-Service -Name sshd
 Write-Host "OpenSSH Server has been restarted to load updated config"
