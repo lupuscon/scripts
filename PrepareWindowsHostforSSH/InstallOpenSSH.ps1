@@ -18,13 +18,15 @@ switch ($((Get-UICulture)[0].DisplayName)){
      Write-Host "$((Get-UICulture)[0].DisplayName) detected, translating ACLs to German"
      $authenticatedUserName = "NT-AUTORITÄT\Authentifizierte Benutzer"
      $systemUserName = "NT-AUTORITÄT\SYSTEM"
-     $administratorsUserName = "VORDEFINIERT\Administratoren"
+     $administratorsGroupName = "Administratoren"
+     $administratorsUserName = "VORDEFINIERT\$administratorsGroupName"
   }
   'English (United States)' {
      Write-Host "$((Get-UICulture)[0].DisplayName) detected, using default ACLs"
      $authenticatedUserName = "NT AUTHORITY\Authenticated Users"
      $systemUserName = "NT AUTHORITY\SYSTEM"
-     $administratorsUserName = "BUILTIN\Administrators"
+     $administratorsGroupName = "administrators"
+     $administratorsUserName = "BUILTIN\$administratorsGroupName"
   }
   default {
      Write-Error 'Currently only English and German UI Languages are supported'
@@ -174,6 +176,15 @@ $regex = '#StrictModes yes'
 # Disable Administrator Password Authentication
 $regex = '#PermitRootLogin prohibit-password'
 (Get-Content $sshconfigfile) -replace $regex, "PermitRootLogin prohibit-password" | Set-Content $sshconfigfile
+
+# Translate MatchGroups to German if OS's Locale is German
+$regex = '#PermitRootLogin prohibit-password'
+(Get-Content $sshconfigfile) -replace $regex, "PermitRootLogin prohibit-password" | Set-Content $sshconfigfile
+
+# Translate MatchGroups to German if OS's Locale is German
+$regex = 'Match Group administrators'
+(Get-Content $sshconfigfile) -replace $regex, "Match Group $administratorsGroupName" | Set-Content $sshconfigfile
+
 # Restart SSHD
 Restart-Service -Name sshd
 Write-Host "OpenSSH Server has been restarted to load updated config"
